@@ -8,17 +8,52 @@ Telegram group moderation bot with admin-controlled URL blocking, keyword alerts
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-$env:TELEGRAM_BOT_TOKEN = "123456:bot-token"
+$env:TELEGRAM_BOT_TOKEN = "<telegram-bot-token>"
 telegram-security-bot
 ```
 
 The bot stores group settings in `data/security-bot.json` by default. Override it with `SECURITY_BOT_DATA` or `--data-file`.
 
+## Railway
+
+This repository includes `railway.json` with the start command Railway needs:
+
+```sh
+PYTHONPATH=src python -m security_bot.bot
+```
+
+Configure these Railway variables on the bot service:
+
+```sh
+TELEGRAM_BOT_TOKEN=<telegram-bot-token>
+SECURITY_BOT_DATA=/app/data/security-bot.json
+LOG_LEVEL=INFO
+SECURITY_BOT_NAME_SCAN_SECONDS=60
+```
+
+Attach a Railway volume to the service at `/app/data` so group settings survive deploys and restarts. Keep the service at one replica because the JSON settings store is local to one running process.
+
+If this token previously used a webhook, clear it before using polling:
+
+```sh
+https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/deleteWebhook?drop_pending_updates=true
+```
+
 ## Telegram Permissions
 
 Add the bot to your group as an admin. It needs permission to delete messages and ban users.
 
+If the bot does not receive regular group messages after being made admin, check BotFather privacy settings and re-add the bot to the group.
+
 For private alerts, each recipient must open the bot in Telegram and send `/start` once. Telegram does not let bots initiate private chats with users who have never started them.
+
+## Security Notes
+
+- Store the Telegram token only in Railway variables or local environment variables. Do not commit `.env` files or real tokens.
+- URL moderation scans visible message text, captions, Telegram URL entities, and hidden `text_link` URLs.
+- Polling mode has no public HTTP endpoint, so there is no webhook secret to configure.
+- The JSON settings file stores group configuration, known user names, recipient usernames, and recipient Telegram IDs. Treat the Railway volume as private operational data.
+- This upstream repository does not include a license file. Get permission before commercial or public production use if you do not control the code.
 
 ## Admin Commands
 

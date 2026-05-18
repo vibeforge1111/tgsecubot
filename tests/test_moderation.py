@@ -13,11 +13,16 @@ from security_bot.moderation import (
 def test_normalize_domain_accepts_plain_domain_and_urls():
     assert normalize_domain("x.com") == "x.com"
     assert normalize_domain("https://www.x.com/path") == "x.com"
+    assert normalize_domain("bücher.example") == "xn--bcher-kva.example"
 
 
 def test_normalize_domain_rejects_invalid_values():
     with pytest.raises(ValueError):
         normalize_domain("not-a-domain")
+    with pytest.raises(ValueError):
+        normalize_domain("-bad.example")
+    with pytest.raises(ValueError):
+        normalize_domain("bad..example")
 
 
 def test_host_allowed_matches_domain_and_subdomains():

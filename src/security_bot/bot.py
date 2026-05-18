@@ -5,8 +5,8 @@ import logging
 import os
 from pathlib import Path
 
-from telegram import Chat, Update, User
-from telegram.constants import ChatMemberStatus, ParseMode
+from telegram import Chat, Message, MessageEntity, Update, User
+from telegram.constants import ChatMemberStatus, MessageEntityType, ParseMode
 from telegram.error import BadRequest, Forbidden, TelegramError
 from telegram.ext import (
     Application,
@@ -29,6 +29,8 @@ from .storage import Recipient, SettingsStore
 
 LOGGER = logging.getLogger(__name__)
 ADMIN_STATUSES = {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER}
+BOT_ALLOWED_UPDATES = ["message", "edited_message"]
+URL_ENTITY_TYPES = {MessageEntityType.TEXT_LINK, MessageEntityType.URL}
 ADMIN_COMMANDS_TEXT = """Admin Commands:
 /url ON|OFF - enable or disable URL restriction. Default: OFF.
 /addurl example.com - allow a domain and its subdomains.
@@ -77,6 +79,29 @@ def _alert_user_label(user: User) -> str:
 
 def _looks_like_deleted_account(user: User) -> bool:
     return user.first_name == "Deleted Account" and not user.last_name and not user.username
+
+
+def _entity_url_text(message: Message, entity: MessageEntity, *, caption: bool) -> str | None:
+    if entity.type == MessageEntityType.TEXT_LINK:
+        return entity.url
+    if entity.type != MessageEntityType.URL:
+        return None
+    return message.parse_caption_entity(entity) if caption else message.parse_entity(entity)
+
+
+def _message_moderation_text(message: Message) -> str:
+    values = [message.text or "", message.caption or ""]
+    for entity in message.entities or ():
+        if entity.type in URL_ENTITY_TYPES:
+            value = _entity_url_text(message, entity, caption=False)
+            if value:
+                values.append(value)
+    for entity in message.caption_entities or ():
+        if entity.type in URL_ENTITY_TYPES:
+            value = _entity_url_text(message, entity, caption=True)
+            if value:
+                values.append(value)
+    return "\n".join(values)
 
 
 async def _is_group_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -440,8 +465,9 @@ async def _handle_name_seen(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     name = display_name(user.first_name, user.last_name, user.username)
     key = str(user.id)
     previous = settings.known_names.get(key)
-    settings.known_names[key] = name
-    _store(context).save()
+    if previous != name:
+        settings.known_names[key] = name
+        _store(context).save()
 
     if not settings.alert_enabled or not name_matches_keywords(name, settings.keywords):
         return
@@ -532,7 +558,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     settings = _store(context).chat(chat.id)
     if await _is_group_admin(update, context):
         return
-    text = message.text or message.caption or ""
+    text = _message_moderation_text(message)
     if settings.sendca_enabled and contains_evm_address(text):
         await _delete_message(update, "EVM address in message")
         return
@@ -593,7 +619,7 @@ def main() -> None:
     if not args.token:
         raise SystemExit("Missing bot token. Set TELEGRAM_BOT_TOKEN or pass --token.")
     print("Telegram security bot is running. Press Ctrl+C to stop.", flush=True)
-    build_application(args.token, args.data_file).run_polling(allowed_updates=Update.ALL_TYPES)
+    build_application(args.token, args.data_file).run_polling(allowed_updates=BOT_ALLOWED_UPDATES)
 
 
 if __name__ == "__main__":

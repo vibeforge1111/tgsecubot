@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 
 EVM_ADDRESS_RE = re.compile(r"(?i)\b0x[a-f0-9]{40}\b")
+DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 URL_RE = re.compile(
     r"(?i)\b((?:https?://|www\.)[^\s<>()]+|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+(?:/[^\s<>()]*)?)"
 )
@@ -40,10 +41,17 @@ def normalize_domain(value: str) -> str:
         candidate = f"https://{candidate}"
     parsed = urlparse(candidate)
     host = (parsed.hostname or "").strip(".").lower()
+    try:
+        host = host.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise ValueError("domain must be a valid hostname") from exc
     if not host or "." not in host:
         raise ValueError("domain must look like example.com")
     if host.startswith("www."):
         host = host[4:]
+    labels = host.split(".")
+    if any(not DOMAIN_LABEL_RE.fullmatch(label) for label in labels):
+        raise ValueError("domain must be a valid hostname")
     return host
 
 
