@@ -43,7 +43,11 @@ ADMIN_COMMANDS_TEXT = """Admin Commands:
 /delkeyword Meta - remove a watched keyword.
 /scandelacc - scan known members and remove deleted Telegram accounts.
 /delca ON|OFF - remove users who join with an EVM-like address in their displayed name. Default: OFF.
-/sendca ON|OFF - delete messages containing EVM-like addresses. Default: OFF."""
+/sendca ON|OFF - delete messages containing EVM-like addresses. Default: OFF.
+/warningmsg ON|OFF - enable or disable scheduled warning messages. Default: OFF.
+/warningtxt message - set the warning message text.
+/warningfreq seconds - set the warning interval in seconds. Default: 600.
+/warnmedia - reply to an image, GIF, or video to attach it to warning messages."""
 
 
 def _username_key(value: str) -> str:
@@ -77,6 +81,10 @@ def _alert_user_label(user: User) -> str:
 
 def _looks_like_deleted_account(user: User) -> bool:
     return user.first_name == "Deleted Account" and not user.last_name and not user.username
+
+
+def _warning_job_name(chat_id: int) -> str:
+    return f"warning:{chat_id}"
 
 
 async def _is_group_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -151,6 +159,27 @@ async def delca_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def sendca_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await toggle_command(update, context, "sendca_enabled", "sendca")
+
+
+async def warningmsg_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_admin(update, context):
+        return
+    chat = update.effective_chat
+    message = update.effective_message
+    if chat is None or message is None:
+        return
+    desired = _bool_arg(context.args[0] if context.args else None)
+    if desired is None:
+        await message.reply_text("Usage: /warningmsg ON or /warningmsg OFF")
+        return
+    settings = _store(context).chat(chat.id)
+    if desired and not settings.warning_text and not settings.warning_media_file_id:
+        await message.reply_text("Set warning text with /warningtxt or media with /warnmedia before turning this ON.")
+        return
+    settings.warning_enabled = desired
+    _store(context).save()
+    _schedule_warning_job(context, chat.id)
+    await message.reply_text(f"/warningmsg is {'ON' if desired else 'OFF'}.")
 
 
 async def addurl(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -325,6 +354,163 @@ async def listrecipient(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await message.reply_text("No alert recipients are configured.")
         return
     await message.reply_text("Alert recipients:\n" + "\n".join(f"@{username}" for username in recipients))
+
+
+async def warningtxt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_admin(update, context):
+        return
+    chat = update.effective_chat
+    message = update.effective_message
+    if chat is None or message is None:
+        return
+    text = " ".join(context.args).strip()
+    if not text:
+        await message.reply_text("Usage: /warningtxt message")
+        return
+    settings = _store(context).chat(chat.id)
+    settings.warning_text = text
+    _store(context).save()
+    await message.reply_text("Warning text has been updated.")
+
+
+async def warningfreq(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_admin(update, context):
+        return
+    chat = update.effective_chat
+    message = update.effective_message
+    if chat is None or message is None:
+        return
+    if not context.args:
+        await message.reply_text("Usage: /warningfreq seconds")
+        return
+    try:
+        seconds = int(context.args[0])
+    except ValueError:
+        await message.reply_text("Frequency must be a whole number of seconds.")
+        return
+    if seconds < 10:
+        await message.reply_text("Frequency must be at least 10 seconds.")
+        return
+    settings = _store(context).chat(chat.id)
+    settings.warning_freq_seconds = seconds
+    _store(context).save()
+    _schedule_warning_job(context, chat.id)
+    await message.reply_text(f"Warning frequency set to {seconds} seconds.")
+
+
+def _extract_warning_media(reply_message) -> tuple[str, str] | None:
+    if reply_message.photo:
+        return "photo", reply_message.photo[-1].file_id
+    if reply_message.animation:
+        return "animation", reply_message.animation.file_id
+    if reply_message.video:
+        return "video", reply_message.video.file_id
+    if reply_message.document:
+        mime_type = reply_message.document.mime_type or ""
+        if mime_type.startswith("image/") or mime_type.startswith("video/"):
+            return "document", reply_message.document.file_id
+    return None
+
+
+async def warnmedia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_admin(update, context):
+        return
+    chat = update.effective_chat
+    message = update.effective_message
+    if chat is None or message is None:
+        return
+    reply = message.reply_to_message
+    if reply is None:
+        await message.reply_text("Reply to an image, GIF, or video with /warnmedia.")
+        return
+    media = _extract_warning_media(reply)
+    if media is None:
+        await message.reply_text("No supported media found. Reply to an image, GIF, or video with /warnmedia.")
+        return
+    media_type, file_id = media
+    settings = _store(context).chat(chat.id)
+    settings.warning_media_type = media_type
+    settings.warning_media_file_id = file_id
+    _store(context).save()
+    await message.reply_text("Media has been added.")
+
+
+async def send_warning_message(context: ContextTypes.DEFAULT_TYPE) -> None:
+    job = context.job
+    if job is None or job.data is None:
+        return
+    chat_id = int(job.data["chat_id"])
+    settings = _store(context).chat(chat_id)
+    if not settings.warning_enabled:
+        return
+    if not settings.warning_text and not settings.warning_media_file_id:
+        return
+    try:
+        await _send_configured_warning(context, chat_id)
+    except TelegramError:
+        LOGGER.exception("Unable to send warning message to chat %s", chat_id)
+
+
+async def _send_configured_warning(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    settings = _store(context).chat(chat_id)
+    text = settings.warning_text or None
+    media_type = settings.warning_media_type
+    file_id = settings.warning_media_file_id
+    if not file_id:
+        await context.bot.send_message(chat_id=chat_id, text=text or "")
+        return
+    if media_type == "photo":
+        await context.bot.send_photo(chat_id=chat_id, photo=file_id, caption=text)
+    elif media_type == "animation":
+        await context.bot.send_animation(chat_id=chat_id, animation=file_id, caption=text)
+    elif media_type == "video":
+        await context.bot.send_video(chat_id=chat_id, video=file_id, caption=text)
+    elif media_type == "document":
+        await context.bot.send_document(chat_id=chat_id, document=file_id, caption=text)
+    else:
+        await context.bot.send_message(chat_id=chat_id, text=text or "")
+
+
+def _schedule_warning_job(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    job_queue = context.application.job_queue
+    if job_queue is None:
+        LOGGER.warning("Job queue is unavailable; warning messages are disabled.")
+        return
+    name = _warning_job_name(chat_id)
+    for job in job_queue.get_jobs_by_name(name):
+        job.schedule_removal()
+    settings = _store(context).chat(chat_id)
+    if not settings.warning_enabled:
+        return
+    interval = max(settings.warning_freq_seconds, 10)
+    job_queue.run_repeating(
+        send_warning_message,
+        interval=interval,
+        first=interval,
+        name=name,
+        data={"chat_id": chat_id},
+    )
+
+
+def _schedule_all_warning_jobs(app: Application) -> None:
+    job_queue = app.job_queue
+    if job_queue is None:
+        LOGGER.warning("Job queue is unavailable; warning messages are disabled.")
+        return
+    store = app.bot_data.get("store")
+    if not isinstance(store, SettingsStore):
+        return
+    for chat_id, settings in store.chats().items():
+        if not settings.warning_enabled:
+            continue
+        interval = max(settings.warning_freq_seconds, 10)
+        job_queue.run_repeating(
+            send_warning_message,
+            interval=interval,
+            first=interval,
+            name=_warning_job_name(chat_id),
+            data={"chat_id": chat_id},
+        )
 
 
 async def scandeletedaccounts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -554,6 +740,10 @@ def build_application(token: str, data_file: Path) -> Application:
     app.add_handler(CommandHandler("alert", alert_command))
     app.add_handler(CommandHandler("delca", delca_command))
     app.add_handler(CommandHandler("sendca", sendca_command))
+    app.add_handler(CommandHandler("warningmsg", warningmsg_command))
+    app.add_handler(CommandHandler("warningtxt", warningtxt))
+    app.add_handler(CommandHandler("warningfreq", warningfreq))
+    app.add_handler(CommandHandler("warnmedia", warnmedia))
     app.add_handler(CommandHandler("addurl", addurl))
     app.add_handler(CommandHandler("listurl", listurl))
     app.add_handler(CommandHandler("delurl", delurl))
@@ -570,6 +760,7 @@ def build_application(token: str, data_file: Path) -> Application:
     if app.job_queue is not None:
         interval = int(os.getenv("SECURITY_BOT_NAME_SCAN_SECONDS", "60"))
         app.job_queue.run_repeating(scan_known_member_names, interval=interval, first=interval)
+        _schedule_all_warning_jobs(app)
     else:
         LOGGER.warning("Job queue is unavailable; periodic display-name scans are disabled.")
     return app
