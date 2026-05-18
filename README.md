@@ -71,9 +71,15 @@ For private alerts, each recipient must open the bot in Telegram and send `/star
 - `/scandelacc` scans known group members and removes deleted Telegram accounts.
 - `/delca ON|OFF` removes users when they join with an EVM-like address in their displayed name. Default: OFF.
 - `/sendca ON|OFF` deletes messages containing EVM-like addresses. Default: OFF.
+- `/warningmsg ON|OFF` enables or disables scheduled warning messages. Default: OFF.
+- `/warningtxt message` sets the warning message text.
+- `/warningfreq seconds` sets how often the warning is sent. Default: 600 seconds. Minimum: 60 seconds.
+- `/warnmedia` adds media to warning messages by replying to an image, GIF, or video.
 
 Group admins are always allowed to send URLs. Only group admins can change bot settings.
 
 Keyword alerts trigger on joins, on messages from a user whose display name changed, and on a periodic scan of users the bot has already seen in the group. The scan interval defaults to 60 seconds and can be changed with `SECURITY_BOT_NAME_SCAN_SECONDS`.
 
 `/scandelacc` can only scan users the bot already knows from joins or messages. Telegram Bot API does not provide bots with a full group member list.
+
+For `/warnmedia`, first send the image, GIF, or video in the group, then reply to that media message with `/warnmedia`. Telegram file IDs are stored, not downloaded media files.
