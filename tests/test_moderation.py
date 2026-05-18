@@ -38,6 +38,8 @@ def test_contains_blocked_url_ignores_allowed_domains():
 
 def test_contains_evm_address_detects_address_like_text():
     assert contains_evm_address("0x742d35Cc6634C0532925a3b844Bc454e4438f44e")
+    assert contains_evm_address("User0x742d35Cc6634C0532925a3b844Bc454e4438f44e")
+    assert contains_evm_address("User 0x742d35Cc6634C0532925a3b844Bc454e4438f44e Name")
     assert not contains_evm_address("0x1234")
 
 
