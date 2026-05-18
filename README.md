@@ -27,7 +27,7 @@ Configure these Railway variables on the bot service:
 ```sh
 TELEGRAM_BOT_TOKEN=<telegram-bot-token>
 SECURITY_BOT_DATA=/app/data/security-bot.json
-LOG_LEVEL=INFO
+LOG_LEVEL=WARNING
 SECURITY_BOT_NAME_SCAN_SECONDS=60
 ```
 

@@ -31,6 +31,7 @@ LOGGER = logging.getLogger(__name__)
 ADMIN_STATUSES = {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER}
 BOT_ALLOWED_UPDATES = ["message", "edited_message"]
 URL_ENTITY_TYPES = {MessageEntityType.TEXT_LINK, MessageEntityType.URL}
+NOISY_LOGGERS = ("httpx", "httpcore")
 ADMIN_COMMANDS_TEXT = """Admin Commands:
 /url ON|OFF - enable or disable URL restriction. Default: OFF.
 /addurl example.com - allow a domain and its subdomains.
@@ -132,6 +133,12 @@ def _store(context: ContextTypes.DEFAULT_TYPE) -> SettingsStore:
     if not isinstance(store, SettingsStore):
         raise RuntimeError("Settings store is not configured")
     return store
+
+
+def configure_logging() -> None:
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+    for logger_name in NOISY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -614,7 +621,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+    configure_logging()
     args = parse_args()
     if not args.token:
         raise SystemExit("Missing bot token. Set TELEGRAM_BOT_TOKEN or pass --token.")
