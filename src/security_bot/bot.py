@@ -5,7 +5,7 @@ import logging
 import os
 from pathlib import Path
 
-from telegram import Chat, Update, User
+from telegram import Chat, MessageEntity, Update, User
 from telegram.constants import ChatMemberStatus, ParseMode
 from telegram.error import BadRequest, Forbidden, TelegramError
 from telegram.ext import (
@@ -85,6 +85,39 @@ def _looks_like_deleted_account(user: User) -> bool:
 
 def _warning_job_name(chat_id: int) -> str:
     return f"warning:{chat_id}"
+
+
+def _utf16_len(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
+
+def _extract_command_payload(text: str) -> tuple[str, int]:
+    command_end = next((index for index, char in enumerate(text) if char.isspace()), len(text))
+    payload_start = command_end
+    while payload_start < len(text) and text[payload_start].isspace():
+        payload_start += 1
+    return text[payload_start:], _utf16_len(text[:payload_start])
+
+
+def _shift_message_entities(message, payload_start_offset: int) -> list[dict[str, object]]:
+    shifted: list[dict[str, object]] = []
+    for entity in message.entities or []:
+        entity_data = entity.to_dict()
+        entity_start = int(entity_data["offset"])
+        entity_end = entity_start + int(entity_data["length"])
+        if entity_end <= payload_start_offset:
+            continue
+        entity_data["offset"] = max(entity_start - payload_start_offset, 0)
+        entity_data["length"] = entity_end - max(entity_start, payload_start_offset)
+        if entity_data["length"] > 0:
+            shifted.append(entity_data)
+    return shifted
+
+
+def _warning_entities(context: ContextTypes.DEFAULT_TYPE, settings) -> list[MessageEntity] | None:
+    if not settings.warning_entities:
+        return None
+    return [MessageEntity.de_json(entity, context.bot) for entity in settings.warning_entities]
 
 
 async def _is_group_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -363,12 +396,14 @@ async def warningtxt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     message = update.effective_message
     if chat is None or message is None:
         return
-    text = " ".join(context.args).strip()
+    raw_text = message.text or ""
+    text, payload_start_offset = _extract_command_payload(raw_text)
     if not text:
         await message.reply_text("Usage: /warningtxt message")
         return
     settings = _store(context).chat(chat.id)
     settings.warning_text = text
+    settings.warning_entities = _shift_message_entities(message, payload_start_offset)
     _store(context).save()
     await message.reply_text("Warning text has been updated.")
 
@@ -454,21 +489,22 @@ async def send_warning_message(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def _send_configured_warning(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
     settings = _store(context).chat(chat_id)
     text = settings.warning_text or None
+    entities = _warning_entities(context, settings) if text else None
     media_type = settings.warning_media_type
     file_id = settings.warning_media_file_id
     if not file_id:
-        await context.bot.send_message(chat_id=chat_id, text=text or "")
+        await context.bot.send_message(chat_id=chat_id, text=text or "", entities=entities)
         return
     if media_type == "photo":
-        await context.bot.send_photo(chat_id=chat_id, photo=file_id, caption=text)
+        await context.bot.send_photo(chat_id=chat_id, photo=file_id, caption=text, caption_entities=entities)
     elif media_type == "animation":
-        await context.bot.send_animation(chat_id=chat_id, animation=file_id, caption=text)
+        await context.bot.send_animation(chat_id=chat_id, animation=file_id, caption=text, caption_entities=entities)
     elif media_type == "video":
-        await context.bot.send_video(chat_id=chat_id, video=file_id, caption=text)
+        await context.bot.send_video(chat_id=chat_id, video=file_id, caption=text, caption_entities=entities)
     elif media_type == "document":
-        await context.bot.send_document(chat_id=chat_id, document=file_id, caption=text)
+        await context.bot.send_document(chat_id=chat_id, document=file_id, caption=text, caption_entities=entities)
     else:
-        await context.bot.send_message(chat_id=chat_id, text=text or "")
+        await context.bot.send_message(chat_id=chat_id, text=text or "", entities=entities)
 
 
 def _schedule_warning_job(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:

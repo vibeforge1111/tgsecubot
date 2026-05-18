@@ -48,3 +48,11 @@ Keyword alerts trigger on joins, on messages from a user whose display name chan
 `/scandelacc` can only scan users the bot already knows from joins or messages. Telegram Bot API does not provide bots with a full group member list.
 
 For `/warnmedia`, first send the image, GIF, or video in the group, then reply to that media message with `/warnmedia`. Telegram file IDs are stored, not downloaded media files.
+
+`/warningtxt` preserves new lines and Telegram text formatting such as bold, italic, links, and code. For multi-line warnings, send the command like this:
+
+```text
+/warningtxt First line
+Second line
+Third line
+```

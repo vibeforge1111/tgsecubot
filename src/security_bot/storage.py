@@ -22,6 +22,7 @@ class ChatSettings:
     sendca_enabled: bool = False
     warning_enabled: bool = False
     warning_text: str = ""
+    warning_entities: list[dict[str, object]] = field(default_factory=list)
     warning_freq_seconds: int = 600
     warning_media_type: str | None = None
     warning_media_file_id: str | None = None
@@ -76,6 +77,7 @@ class SettingsStore:
                 sendca_enabled=bool(value.get("sendca_enabled", False)),
                 warning_enabled=bool(value.get("warning_enabled", False)),
                 warning_text=str(value.get("warning_text", "")),
+                warning_entities=list(value.get("warning_entities", [])),
                 warning_freq_seconds=int(value.get("warning_freq_seconds", 600)),
                 warning_media_type=value.get("warning_media_type"),
                 warning_media_file_id=value.get("warning_media_file_id"),
