@@ -22,6 +22,7 @@ class ChatSettings:
     sendca_enabled: bool = False
     warning_enabled: bool = False
     warning_text: str = ""
+    warning_entities: list[dict[str, object]] = field(default_factory=list)
     warning_freq_seconds: int = 600
     warning_media_type: str | None = None
     warning_media_file_id: str | None = None
@@ -29,6 +30,21 @@ class ChatSettings:
     keywords: list[str] = field(default_factory=list)
     recipients: dict[str, Recipient] = field(default_factory=dict)
     known_names: dict[str, str] = field(default_factory=dict)
+
+
+def _load_warning_entities(value: Any) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    entities: list[dict[str, object]] = []
+    for entity in value:
+        if not isinstance(entity, dict):
+            continue
+        if not isinstance(entity.get("type"), str):
+            continue
+        if not isinstance(entity.get("offset"), int) or not isinstance(entity.get("length"), int):
+            continue
+        entities.append(dict(entity))
+    return entities
 
 
 class SettingsStore:
@@ -76,6 +92,7 @@ class SettingsStore:
                 sendca_enabled=bool(value.get("sendca_enabled", False)),
                 warning_enabled=bool(value.get("warning_enabled", False)),
                 warning_text=str(value.get("warning_text", "")),
+                warning_entities=_load_warning_entities(value.get("warning_entities", [])),
                 warning_freq_seconds=int(value.get("warning_freq_seconds", 600)),
                 warning_media_type=value.get("warning_media_type"),
                 warning_media_file_id=value.get("warning_media_file_id"),
