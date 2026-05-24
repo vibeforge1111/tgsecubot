@@ -1,4 +1,7 @@
+import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from telegram import Chat, Message, MessageEntity
 from telegram.constants import MessageEntityType
@@ -7,8 +10,10 @@ from security_bot.bot import (
     _extract_command_payload,
     _message_moderation_text,
     _shift_message_entities,
+    send_warning_message,
 )
 from security_bot.moderation import contains_blocked_url
+from security_bot.storage import SettingsStore
 
 
 def _message(**kwargs) -> Message:
@@ -93,3 +98,28 @@ def test_shift_message_entities_keeps_formatting_and_links_only():
         {"type": MessageEntityType.BOLD, "offset": 0, "length": 4},
         {"type": MessageEntityType.TEXT_LINK, "offset": 5, "length": 4, "url": url},
     ]
+
+
+def test_send_warning_message_deletes_previous_and_records_new_id(tmp_path):
+    data_file = tmp_path / "settings.json"
+    store = SettingsStore(data_file)
+    settings = store.chat(-100123)
+    settings.warning_enabled = True
+    settings.warning_text = "Stay alert"
+    settings.warning_message_ids = [111]
+    store.save()
+    bot = SimpleNamespace(
+        delete_message=AsyncMock(),
+        send_message=AsyncMock(return_value=SimpleNamespace(message_id=222)),
+    )
+    context = SimpleNamespace(
+        application=SimpleNamespace(bot_data={"store": store}),
+        bot=bot,
+        job=SimpleNamespace(data={"chat_id": -100123}),
+    )
+
+    asyncio.run(send_warning_message(context))
+
+    bot.delete_message.assert_awaited_once_with(chat_id=-100123, message_id=111)
+    bot.send_message.assert_awaited_once_with(chat_id=-100123, text="Stay alert", entities=None)
+    assert SettingsStore(data_file).chat(-100123).warning_message_ids == [222]

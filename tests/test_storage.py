@@ -11,6 +11,7 @@ def test_store_persists_warning_settings(tmp_path):
     settings.warning_media_type = "photo"
     settings.warning_media_file_id = "photo-file-id"
     settings.warning_entities = [{"type": "bold", "offset": 0, "length": 4}]
+    settings.warning_message_ids = [12345]
     store.save()
 
     loaded = SettingsStore(data_file).chat(-100123)
@@ -21,6 +22,7 @@ def test_store_persists_warning_settings(tmp_path):
     assert loaded.warning_media_type == "photo"
     assert loaded.warning_media_file_id == "photo-file-id"
     assert loaded.warning_entities == [{"type": "bold", "offset": 0, "length": 4}]
+    assert loaded.warning_message_ids == [12345]
 
 
 def test_store_ignores_malformed_warning_entities(tmp_path):
@@ -43,3 +45,21 @@ def test_store_ignores_malformed_warning_entities(tmp_path):
     loaded = SettingsStore(data_file).chat(-100123)
 
     assert loaded.warning_entities == [{"type": "bold", "offset": 0, "length": 4}]
+
+
+def test_store_ignores_malformed_warning_message_ids(tmp_path):
+    data_file = tmp_path / "settings.json"
+    data_file.write_text(
+        """
+        {
+          "-100123": {
+            "warning_message_ids": [123, "456", 0, -1, true, "bad"]
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    loaded = SettingsStore(data_file).chat(-100123)
+
+    assert loaded.warning_message_ids == [123, 456]

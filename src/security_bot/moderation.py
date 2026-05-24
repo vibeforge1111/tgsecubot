@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 EVM_ADDRESS_RE = re.compile(r"(?i)0x[a-f0-9]{40}")
 DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 URL_RE = re.compile(
-    r"(?i)\b((?:https?://|www\.)[^\s<>()]+|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+(?:/[^\s<>()]*)?)"
+    r"(?i)\b((?:https?://|www\.)[^\s<>()]+|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z][a-z0-9-]{1,62}(?:/[^\s<>()]*)?)"
 )
 
 
