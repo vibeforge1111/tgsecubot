@@ -481,30 +481,48 @@ async def send_warning_message(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not settings.warning_text and not settings.warning_media_file_id:
         return
     try:
-        await _send_configured_warning(context, chat_id)
+        await _delete_previous_warning_messages(context, chat_id)
+        sent_message = await _send_configured_warning(context, chat_id)
+        settings.warning_message_ids = [sent_message.message_id]
+        _store(context).save()
     except TelegramError:
         LOGGER.exception("Unable to send warning message to chat %s", chat_id)
 
 
-async def _send_configured_warning(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+async def _delete_previous_warning_messages(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    store = _store(context)
+    settings = store.chat(chat_id)
+    if not settings.warning_message_ids:
+        return
+    for message_id in settings.warning_message_ids:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except BadRequest:
+            LOGGER.info("Previous warning message %s in chat %s could not be deleted.", message_id, chat_id)
+        except TelegramError:
+            LOGGER.exception("Unable to delete previous warning message %s in chat %s", message_id, chat_id)
+    settings.warning_message_ids = []
+    store.save()
+
+
+async def _send_configured_warning(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     settings = _store(context).chat(chat_id)
     text = settings.warning_text or None
     entities = _warning_entities(context, settings) if text else None
     media_type = settings.warning_media_type
     file_id = settings.warning_media_file_id
     if not file_id:
-        await context.bot.send_message(chat_id=chat_id, text=text or "", entities=entities)
-        return
+        return await context.bot.send_message(chat_id=chat_id, text=text or "", entities=entities)
     if media_type == "photo":
-        await context.bot.send_photo(chat_id=chat_id, photo=file_id, caption=text, caption_entities=entities)
+        return await context.bot.send_photo(chat_id=chat_id, photo=file_id, caption=text, caption_entities=entities)
     elif media_type == "animation":
-        await context.bot.send_animation(chat_id=chat_id, animation=file_id, caption=text, caption_entities=entities)
+        return await context.bot.send_animation(chat_id=chat_id, animation=file_id, caption=text, caption_entities=entities)
     elif media_type == "video":
-        await context.bot.send_video(chat_id=chat_id, video=file_id, caption=text, caption_entities=entities)
+        return await context.bot.send_video(chat_id=chat_id, video=file_id, caption=text, caption_entities=entities)
     elif media_type == "document":
-        await context.bot.send_document(chat_id=chat_id, document=file_id, caption=text, caption_entities=entities)
+        return await context.bot.send_document(chat_id=chat_id, document=file_id, caption=text, caption_entities=entities)
     else:
-        await context.bot.send_message(chat_id=chat_id, text=text or "", entities=entities)
+        return await context.bot.send_message(chat_id=chat_id, text=text or "", entities=entities)
 
 
 def _schedule_warning_job(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
